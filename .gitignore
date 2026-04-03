@@ -1,0 +1,20 @@
+# مجلدات الحزم (ضخمة جداً ولا يجب رفعها)
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# ملفات البيئة والأسرار (خطر جداً رفعها)
+.env
+.env.local
+backend/.env
+frontend/.env
+
+# ملفات البناء (يتم إنشاؤها تلقائياً لاحقاً)
+dist/
+build/
+frontend/dist/
+design/
+design_mobile/
+# ملفات النظام المزعجة
+.DS_Store
+Thumbs.db

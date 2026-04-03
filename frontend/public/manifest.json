@@ -1,0 +1,22 @@
+{
+  "name": "SharifCloud-Sync | The Ethereal Archive",
+  "short_name": "Ether Cloud",
+  "description": "Personal cloud photo storage — secure, offline-resilient, beautifully organized.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f9fb",
+  "theme_color": "#0053dc",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/vite.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
