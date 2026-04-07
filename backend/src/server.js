@@ -32,7 +32,7 @@ app.use(express.json());
 // ─────────────────────────────────────
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 60,
+  max: 1000,
   message: {
     error: 'Too Many Requests',
     message: 'Rate limit exceeded. Try again later.',

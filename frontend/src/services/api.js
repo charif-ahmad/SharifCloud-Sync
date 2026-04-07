@@ -1,5 +1,5 @@
-// const API_BASE = `http://${window.location.hostname}:3000/api`;
-const API_BASE = `http://100.103.154.10:3000/api`;
+const API_BASE = `http://${window.location.hostname}:3000/api`;
+// const API_BASE = `http://100.103.154.10:3000/api`;
 
 function getApiKey() {
   return localStorage.getItem('sharifcloud_api_key') || '';
@@ -75,6 +75,14 @@ export function movePhoto(id, folderId) {
   });
 }
 
+export function batchMovePhotos(photoIds, folderId) {
+  return request(`/photos/batch-move`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photoIds, folderId }),
+  });
+}
+
 export function uploadPhoto(file, { folderId, onProgress } = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -126,6 +134,14 @@ export function renameFolder(id, name) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
+  });
+}
+
+export function moveFolder(id, parentId) {
+  return request(`/folders/${id}/move`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentId }),
   });
 }
 

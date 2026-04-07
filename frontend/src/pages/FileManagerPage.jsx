@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { listFolders, listPhotos, createFolder, renameFolder, deleteFolder, getFolder, getPhotoUrl } from '../services/api';
+import { listFolders, listPhotos, createFolder, renameFolder, deleteFolder, moveFolder, getFolder, getPhotoUrl, deletePhoto, batchMovePhotos } from '../services/api';
 import PhotoViewer from '../components/PhotoViewer';
+import FolderPickerModal from '../components/FolderPickerModal';
 
 export default function FileManagerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -15,14 +16,21 @@ export default function FileManagerPage() {
   const [viewerPhoto, setViewerPhoto] = useState(null);
   const [viewerIndex, setViewerIndex] = useState(-1);
 
-  // Modals
+  // Modals & Context
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [contextMenu, setContextMenu] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showMovePicker, setShowMovePicker] = useState(false);
+  const [moveTarget, setMoveTarget] = useState(null); 
   const contextRef = useRef(null);
+
+  // Selection Mode
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedFolders, setSelectedFolders] = useState([]);
+  const [selectedPhotos, setSelectedPhotos] = useState([]);
 
   useEffect(() => {
     loadContent();
@@ -97,22 +105,71 @@ export default function FileManagerPage() {
     }
   }
 
-  async function handleDeleteFolder(folder) {
+  function handleContextMenu(e, item, type = 'folder') {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 120);
+    setContextMenu({ x, y, item, type });
+  }
+
+  function toggleSelectionMode() {
+    setIsSelectionMode(!isSelectionMode);
+    setSelectedFolders([]);
+    setSelectedPhotos([]);
+  }
+
+  function toggleSelectFolder(id) {
+    setSelectedFolders(prev => prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]);
+  }
+
+  function toggleSelectPhoto(id) {
+    setSelectedPhotos(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+  }
+
+  async function handleMove(targetFolderId) {
     try {
-      await deleteFolder(folder.id);
-      setDeleteTarget(null);
+      if (moveTarget?.type === 'multi') {
+        const promises = [];
+        if (selectedPhotos.length > 0) {
+          promises.push(batchMovePhotos(selectedPhotos, targetFolderId));
+        }
+        for (const fId of selectedFolders) {
+          promises.push(moveFolder(fId, targetFolderId));
+        }
+        await Promise.all(promises);
+        toggleSelectionMode();
+      } else if (moveTarget?.type === 'folder') {
+        await moveFolder(moveTarget.item.id, targetFolderId);
+      } else if (moveTarget?.type === 'photo') {
+        await batchMovePhotos([moveTarget.item.id], targetFolderId);
+      }
+      setShowMovePicker(false);
+      setMoveTarget(null);
       loadContent();
     } catch (err) {
       alert(err.message);
     }
   }
 
-  function handleContextMenu(e, folder) {
-    e.preventDefault();
-    e.stopPropagation();
-    const x = Math.min(e.clientX, window.innerWidth - 180);
-    const y = Math.min(e.clientY, window.innerHeight - 120);
-    setContextMenu({ x, y, folder });
+  async function handleDeleteConfirmed() {
+    try {
+      if (deleteTarget?.type === 'multi') {
+        const promises = [];
+        for (const pId of selectedPhotos) promises.push(deletePhoto(pId));
+        for (const fId of selectedFolders) promises.push(deleteFolder(fId));
+        await Promise.all(promises);
+        toggleSelectionMode();
+      } else if (deleteTarget?.type === 'folder') {
+        await deleteFolder(deleteTarget.item.id);
+      } else if (deleteTarget?.type === 'photo') {
+        await deletePhoto(deleteTarget.item.id);
+      }
+      setDeleteTarget(null);
+      loadContent();
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   function openViewer(index) {
@@ -152,15 +209,48 @@ export default function FileManagerPage() {
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn btn-secondary" onClick={() => setShowNewFolder(true)}>
-            <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>create_new_folder</span>
-            Create New Folder
-          </button>
-          <button className="btn btn-primary" onClick={() => navigate(`/upload${currentFolderId ? `?folder=${currentFolderId}` : ''}`)}>
-            <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>cloud_upload</span>
-            Upload Here
-          </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {isSelectionMode ? (
+            <>
+              <span className="body-md" style={{ color: 'var(--on-surface-variant)', marginRight: '0.5rem' }}>
+                {selectedFolders.length + selectedPhotos.length} selected
+              </span>
+              <button 
+                className="btn btn-secondary" 
+                disabled={selectedFolders.length === 0 && selectedPhotos.length === 0}
+                onClick={() => { setMoveTarget({ type: 'multi' }); setShowMovePicker(true); }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>drive_file_move</span>
+                Move
+              </button>
+              <button 
+                className="btn btn-secondary danger" 
+                style={{ color: 'var(--error)' }}
+                disabled={selectedFolders.length === 0 && selectedPhotos.length === 0}
+                onClick={() => setDeleteTarget({ type: 'multi' })}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>delete</span>
+                Delete
+              </button>
+              <button className="btn btn-ghost" onClick={toggleSelectionMode}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost" onClick={toggleSelectionMode} title="Select Items">
+                <span className="material-symbols-outlined" style={{ fontSize: '1.25rem' }}>checklist</span>
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowNewFolder(true)}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>create_new_folder</span>
+                Create New Folder
+              </button>
+              <button className="btn btn-primary" onClick={() => navigate(`/upload${currentFolderId ? `?folder=${currentFolderId}` : ''}`)}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>cloud_upload</span>
+                Upload Here
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -176,10 +266,10 @@ export default function FileManagerPage() {
               {folders.map((folder) => (
                 <div
                   key={folder.id}
-                  className="folder-card"
-                  onClick={() => navigateToFolder(folder.id)}
-                  onContextMenu={(e) => handleContextMenu(e, folder)}
-                  style={{ position: 'relative' }}
+                  className={`folder-card ${selectedFolders.includes(folder.id) ? 'selected' : ''}`}
+                  onClick={() => isSelectionMode ? toggleSelectFolder(folder.id) : navigateToFolder(folder.id)}
+                  onContextMenu={(e) => handleContextMenu(e, folder, 'folder')}
+                  style={{ position: 'relative', border: selectedFolders.includes(folder.id) ? '2px solid var(--primary)' : 'none' }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div className="folder-icon" style={{ background: 'var(--secondary-container)', color: 'var(--on-secondary-container)' }}>
@@ -188,12 +278,7 @@ export default function FileManagerPage() {
                     <button
                       className="btn-icon"
                       style={{ width: '2rem', height: '2rem', background: 'transparent' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const x = Math.min(e.clientX, window.innerWidth - 180);
-                        const y = Math.min(e.clientY, window.innerHeight - 120);
-                        setContextMenu({ x, y, folder });
-                      }}
+                      onClick={(e) => handleContextMenu(e, folder, 'folder')}
                       title="More options"
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: '1.25rem', color: 'var(--outline)' }}>more_vert</span>
@@ -213,7 +298,13 @@ export default function FileManagerPage() {
             <div style={{ marginTop: folders.length > 0 ? 0 : '1.5rem' }}>
               <div className="photo-grid">
                 {photos.map((photo, index) => (
-                  <div key={photo.id} className="photo-card" onClick={() => openViewer(index)}>
+                  <div 
+                    key={photo.id} 
+                    className="photo-card" 
+                    onClick={() => isSelectionMode ? toggleSelectPhoto(photo.id) : openViewer(index)}
+                    onContextMenu={(e) => handleContextMenu(e, photo, 'photo')}
+                    style={{ border: selectedPhotos.includes(photo.id) ? '2px solid var(--primary)' : 'none' }}
+                  >
                     <img
                       src={getPhotoUrl(photo.id)}
                       alt={photo.originalName}
@@ -295,12 +386,18 @@ export default function FileManagerPage() {
       {contextMenu && (
         <>
           <div className="mobile-only-backdrop" onClick={() => setContextMenu(null)} />
-          <div ref={contextRef} className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x, position: 'fixed' }}>
-            <button className="context-menu-item" onClick={() => { setRenameTarget(contextMenu.folder); setRenameValue(contextMenu.folder.name); setContextMenu(null); }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>edit</span>
-              Rename
+          <div ref={contextRef} className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x, position: 'fixed', zIndex: 100 }}>
+            {contextMenu.type === 'folder' && (
+              <button className="context-menu-item" onClick={() => { setRenameTarget(contextMenu.item); setRenameValue(contextMenu.item.name); setContextMenu(null); }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>edit</span>
+                Rename
+              </button>
+            )}
+            <button className="context-menu-item" onClick={() => { setMoveTarget({ type: contextMenu.type, item: contextMenu.item }); setShowMovePicker(true); setContextMenu(null); }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>drive_file_move</span>
+              Move to...
             </button>
-            <button className="context-menu-item danger" onClick={() => { setDeleteTarget(contextMenu.folder); setContextMenu(null); }}>
+            <button className="context-menu-item danger" onClick={() => { setDeleteTarget({ type: contextMenu.type, item: contextMenu.item }); setContextMenu(null); }}>
               <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>delete</span>
               Delete
             </button>
@@ -317,26 +414,41 @@ export default function FileManagerPage() {
                 <span className="material-symbols-outlined" style={{ color: 'var(--error)', fontSize: '1.5rem' }}>warning</span>
               </div>
               <div>
-                <h2 className="headline-sm" style={{ marginBottom: '0.25rem' }}>Delete Folder</h2>
+                <h2 className="headline-sm" style={{ marginBottom: '0.25rem' }}>Confirm Deletion</h2>
                 <p className="body-md" style={{ color: 'var(--on-surface-variant)' }}>This action cannot be undone.</p>
               </div>
             </div>
             <p className="body-lg" style={{ marginBottom: '1.5rem' }}>
-              Are you sure you want to delete <strong>"{deleteTarget.name}"</strong>? Photos inside will be unassigned.
+              {deleteTarget.type === 'folder' 
+                ? `Are you sure you want to delete "${deleteTarget.item.name}"? This will permanently delete ALL photos and folders inside it.`
+                : deleteTarget.type === 'multi'
+                  ? `Are you sure you want to permanently delete these ${selectedPhotos.length + selectedFolders.length} items? All contents inside selected folders will also be destroyed.`
+                  : `Are you sure you want to permanently delete this photo?`
+              }
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
               <button
                 className="btn"
                 style={{ background: 'var(--error)', color: 'var(--on-error)' }}
-                onClick={() => handleDeleteFolder(deleteTarget)}
+                onClick={handleDeleteConfirmed}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: '1.125rem' }}>delete</span>
-                Delete Folder
+                Delete
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Move Picker Modal */}
+      {showMovePicker && moveTarget && (
+        <FolderPickerModal
+          currentFolderId={currentFolderId}
+          disableFolderIds={moveTarget.type === 'folder' ? [moveTarget.item.id] : (moveTarget.type === 'multi' ? selectedFolders : [])}
+          onClose={() => { setShowMovePicker(false); setMoveTarget(null); }}
+          onMove={handleMove}
+        />
       )}
 
       {/* Photo Viewer */}

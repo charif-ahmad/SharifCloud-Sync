@@ -14,6 +14,7 @@ router.get('/folders', folderController.listFolders);
 router.get('/folders/:id', folderController.getFolder);
 router.put('/folders/:id', folderController.renameFolder);
 router.delete('/folders/:id', folderController.deleteFolder);
+router.put('/folders/:id/move', folderController.moveFolder);
 
 // ─── Photos ─────────────────────────────────────
 router.post('/photos/upload', (req, res, next) => {
@@ -34,6 +35,7 @@ router.get('/photos', photoController.listPhotos);
 router.get('/photos/:id', photoController.getPhoto);
 router.delete('/photos/:id', photoController.deletePhoto);
 router.put('/photos/:id/move', folderController.movePhoto);
+router.put('/photos/batch-move', photoController.batchMovePhotos);
 
 // ─── Storage ────────────────────────────────────
 router.get('/storage/stats', photoController.getStorageStats);

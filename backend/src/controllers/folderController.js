@@ -243,10 +243,13 @@ async function renameFolder(req, res, next) {
 
 /**
  * DELETE /api/folders/:id
- * Delete a folder (photos inside become unassigned, subfolders cascade)
+ * Delete a folder (Cascade delete: deletes all subfolders, and physically deletes all photos inside)
  */
 async function deleteFolder(req, res, next) {
   const client = await pool.connect();
+  const fs = require('fs');
+  const path = require('path');
+  const config = require('../config');
 
   try {
     const { id } = req.params;
@@ -264,15 +267,46 @@ async function deleteFolder(req, res, next) {
       });
     }
 
-    // Unassign photos in this folder (set folder_id to null)
-    await client.query('UPDATE photos SET folder_id = NULL WHERE folder_id = $1', [id]);
+    // CTE to recursively find all subfolders
+    const allFoldersQuery = `
+      WITH RECURSIVE folder_tree AS (
+        SELECT id FROM folders WHERE id = $1
+        UNION ALL
+        SELECT f.id FROM folders f
+        INNER JOIN folder_tree ft ON f.parent_id = ft.id
+      )
+      SELECT id FROM folder_tree
+    `;
+    const folderResult = await client.query(allFoldersQuery, [id]);
+    const folderIds = folderResult.rows.map(row => row.id);
+
+    // Get all photos in these folders
+    const photosQuery = `SELECT id, file_path FROM photos WHERE folder_id = ANY($1::uuid[])`;
+    const photosResult = await client.query(photosQuery, [folderIds]);
+    
+    // Delete physical files
+    for (const photo of photosResult.rows) {
+      const absolutePath = path.join(config.storage.uploadDir, photo.file_path);
+      if (fs.existsSync(absolutePath)) {
+        try {
+          fs.unlinkSync(absolutePath);
+        } catch (e) {
+          console.error(`Failed to delete physical file: ${absolutePath}`, e);
+        }
+      }
+    }
+
+    // Delete photos from DB
+    if (photosResult.rows.length > 0) {
+      await client.query(`DELETE FROM photos WHERE folder_id = ANY($1::uuid[])`, [folderIds]);
+    }
 
     // Delete folder (subfolders cascade due to ON DELETE CASCADE)
     await client.query('DELETE FROM folders WHERE id = $1', [id]);
 
     await client.query('COMMIT');
 
-    res.json({ deleted: true, id });
+    res.json({ deleted: true, id, photosDeleted: photosResult.rows.length });
   } catch (error) {
     await client.query('ROLLBACK');
     next(error);
@@ -326,6 +360,89 @@ async function movePhoto(req, res, next) {
   }
 }
 
+/**
+ * PUT /api/folders/:id/move
+ * Move a folder to a new parent folder or root
+ */
+async function moveFolder(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { parentId } = req.body;
+
+    // Prevent moving folder into itself
+    if (id === parentId) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Cannot move a folder into itself.',
+        status: 400,
+      });
+    }
+
+    // CTE to recursively find all subfolders (to prevent circular loops)
+    if (parentId) {
+      const allFoldersQuery = `
+        WITH RECURSIVE folder_tree AS (
+          SELECT id FROM folders WHERE id = $1
+          UNION ALL
+          SELECT f.id FROM folders f
+          INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        SELECT id FROM folder_tree
+      `;
+      const folderResult = await pool.query(allFoldersQuery, [id]);
+      const subfolderIds = folderResult.rows.map(row => row.id);
+
+      if (subfolderIds.includes(parentId)) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Cannot move a folder into one of its own subfolders.',
+          status: 400,
+        });
+      }
+
+      // Check if target parent exists
+      const parentCheck = await pool.query('SELECT id FROM folders WHERE id = $1', [parentId]);
+      if (parentCheck.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: 'Target parent folder not found.',
+          status: 404,
+        });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE folders SET parent_id = $1 WHERE id = $2
+       RETURNING id, name, parent_id`,
+      [parentId || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Folder not found.',
+        status: 404,
+      });
+    }
+
+    res.json({
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      parentId: result.rows[0].parent_id,
+      message: parentId ? 'Folder moved successfully.' : 'Folder moved to root.',
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A folder with this name already exists in the destination.',
+        status: 409,
+      });
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   createFolder,
   listFolders,
@@ -333,4 +450,5 @@ module.exports = {
   renameFolder,
   deleteFolder,
   movePhoto,
+  moveFolder,
 };

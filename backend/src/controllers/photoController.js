@@ -367,16 +367,77 @@ async function deletePhoto(req, res, next) {
  */
 async function getStorageStats(req, res, next) {
   try {
-    const result = await pool.query('SELECT * FROM storage_stats');
+    const result = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM photos) AS total_photos,
+        (SELECT COALESCE(SUM(file_size), 0) FROM photos) AS total_size_bytes,
+        (SELECT COUNT(*) FROM folders) AS total_folders,
+        (SELECT MIN(uploaded_at) FROM photos) AS first_upload,
+        (SELECT MAX(uploaded_at) FROM photos) AS last_upload
+    `);
     const stats = result.rows[0];
 
+    // Format bytes to human readable
+    const formatBytes = (bytes) => {
+      const b = parseInt(bytes, 10);
+      if (b === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(b) / Math.log(k));
+      return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
     res.json({
-      totalPhotos: parseInt(stats.total_photos, 10),
-      totalFolders: parseInt(stats.total_folders, 10),
-      totalSize: stats.total_size_human,
-      totalSizeBytes: parseInt(stats.total_size_bytes, 10),
+      totalPhotos: parseInt(stats.total_photos, 10) || 0,
+      totalFolders: parseInt(stats.total_folders, 10) || 0,
+      totalSize: formatBytes(stats.total_size_bytes),
+      totalSizeBytes: parseInt(stats.total_size_bytes, 10) || 0,
       firstUpload: stats.first_upload,
       lastUpload: stats.last_upload,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * PUT /api/photos/batch-move
+ * Move multiple photos to a different folder
+ */
+async function batchMovePhotos(req, res, next) {
+  try {
+    const { photoIds, folderId } = req.body;
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'An array of photoIds is required.',
+        status: 400,
+      });
+    }
+
+    // If folderId is provided, check if it exists
+    if (folderId) {
+      const folderCheck = await pool.query('SELECT id FROM folders WHERE id = $1', [folderId]);
+      if (folderCheck.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Not Found',
+          message: 'Target folder not found.',
+          status: 404,
+        });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE photos SET folder_id = $1 WHERE id = ANY($2::uuid[])`,
+      [folderId || null, photoIds]
+    );
+
+    res.json({
+      success: true,
+      movedCount: result.rowCount,
+      folderId: folderId || null,
+      message: folderId ? `${result.rowCount} photos moved to folder.` : `${result.rowCount} photos moved to root.`,
     });
   } catch (error) {
     next(error);
@@ -392,4 +453,5 @@ module.exports = {
   getPhoto,
   deletePhoto,
   getStorageStats,
+  batchMovePhotos,
 };
