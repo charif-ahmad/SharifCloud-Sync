@@ -1,5 +1,5 @@
-const API_BASE = `http://${window.location.hostname}:3000/api`;
-// const API_BASE = `http://100.103.154.10:3000/api`;
+// const API_BASE = `http://${window.location.hostname}:3000/api`;
+const API_BASE = `http://100.103.154.10:3000/api`;
 
 function getApiKey() {
   return localStorage.getItem('sharifcloud_api_key') || '';

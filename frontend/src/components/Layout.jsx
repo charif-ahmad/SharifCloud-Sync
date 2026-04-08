@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import Sidebar from './Sidebar';
 
 export default function Layout() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, logout } = useAuth();
 
   if (loading) {
     return (
@@ -33,6 +33,14 @@ export default function Layout() {
           </div>
           <span>Ether Cloud</span>
         </div>
+        <button 
+          className="btn-icon" 
+          onClick={logout} 
+          style={{ background: 'transparent', color: 'var(--error)' }} 
+          title="Logout"
+        >
+          <span className="material-symbols-outlined">logout</span>
+        </button>
       </header>
 
       <main className="main-content">
